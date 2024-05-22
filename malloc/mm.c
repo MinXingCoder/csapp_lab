@@ -127,11 +127,13 @@ static void* extend_heap(size_t words)
         return NULL;
     
     /*
+    * init 的情况
     *   | 0 | 8/11 | 8/11 | size/10 | size-DSIZE | size/10 | 0/11 |
     */
-    PUT(HDRP(bp), PACK(size, 0x2));
-    PUT(FTRP(bp), PACK(size, 0x2));
-    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 0x3));
+    size_t alloc = GET_ASIDE_ALLOC(HDRP(bp));
+    PUT(HDRP(bp), PACK(size, alloc));
+    PUT(FTRP(bp), PACK(size, alloc));
+    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 0x1));
 
     return coalesce(bp);
 }
@@ -183,19 +185,30 @@ static void place(void *bp, size_t asize)
 static void* find_fit(size_t asize) 
 {
     char* tmp_heap_listp = NEXT_BLKP(heap_listp);
+    size_t min_size = (size_t)-1;
+    char* min_heap_listp = NULL;
     while(1) 
     {
         size_t size = GET_SIZE(HDRP(tmp_heap_listp));
         if(size == 0)
-            return NULL;
+            break;
         if(GET_ALLOC(HDRP(tmp_heap_listp)) == 1) {
             tmp_heap_listp = NEXT_BLKP(tmp_heap_listp);
             continue;
         }
         
         if(size >= asize) 
-            return tmp_heap_listp;
+        {
+            if(size < min_size) {
+                min_size = size;
+                min_heap_listp = tmp_heap_listp;
+            }
+        }
         tmp_heap_listp = NEXT_BLKP(tmp_heap_listp);
+    }
+
+    if(min_size < (size_t)-1) {
+        return min_heap_listp;
     }
 
     return NULL;
@@ -242,12 +255,11 @@ void mm_free(void *ptr)
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  */
-
 void *mm_realloc(void *ptr, size_t size)
 {
     size_t oldsize;
     void *newptr;
-    
+
     /* If size == 0 then this is just free, and we return NULL. */
     if (size == 0) {
         mm_free(ptr);
@@ -261,7 +273,7 @@ void *mm_realloc(void *ptr, size_t size)
 
     oldsize = GET_SIZE(HDRP(ptr)) - WSIZE;
     if(oldsize >= size) return ptr;
-
+    
     newptr = mm_malloc(size);
 
     if (!newptr) {
@@ -273,5 +285,6 @@ void *mm_realloc(void *ptr, size_t size)
     
     /* Free the old block. */
     mm_free(ptr);
+    
     return newptr;
 }
