@@ -7,3 +7,7 @@
 first fit + no boundary tag
 
 ![image-20240519212506665](Image/image-20240519212506665.png)
+
+best fit + no boundary tag
+
+![image-20240522234136688](Image/image-20240522234136688.png)
