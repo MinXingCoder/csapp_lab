@@ -17,3 +17,9 @@ best fit + no boundary tag
 LIFO
 
 ![屏幕截图 2024-06-03 000322](Image/2024-06-03-000322.png)
+
+### Segregated List
+
+内存利用率有待优化
+
+![image-20240623102447981](Image/image-20240623102447981.png)
