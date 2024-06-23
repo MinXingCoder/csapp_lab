@@ -406,6 +406,7 @@ static int add_range(range_t **ranges, char *lo, int size,
 
     /* The payload must not overlap any other payloads */
     for (p = *ranges;  p != NULL;  p = p->next) {
+		// fprintf(stderr, "add_range: %p\n", p->lo);
         if ((lo >= p->lo && lo <= p-> hi) ||
             (hi >= p->lo && hi <= p->hi)) {
 	    sprintf(msg, "Payload (%p:%p) overlaps another payload (%p:%p)\n",
@@ -424,6 +425,7 @@ static int add_range(range_t **ranges, char *lo, int size,
     p->next = *ranges;
     p->lo = lo;
     p->hi = hi;
+	//fprintf(stderr, "copy: %p\n", p->lo);
     *ranges = p;
     return 1;
 }

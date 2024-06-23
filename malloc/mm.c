@@ -78,8 +78,61 @@ team_t team = {
 
 /* Private global variables */
 static char* heap_listp;
-/* Pointer to first free block */
-static char* heap_free_root;
+
+/* Pointer to heap start */
+static char* heap_start;
+
+// int g_test_count = 0;
+
+// static void mm_check();
+
+static void* get_free_list(size_t size)
+{
+    int index = 0;
+    if(size <= 32) index = 0;
+    else if(size <= 64) index = 1;
+    else if(size <= 128) index = 2;
+    else if(size <= 256) index = 3;
+    else if(size <= 512) index = 4;
+    else if(size <= 1024) index = 5;
+    else if(size <= 2048) index = 6;
+    else if(size <= 4096) index = 7;
+    else index = 8;
+
+    return (heap_start + (index*DSIZE));
+}
+
+static void connect_node(void* prev_block, void* next_block, void* current_block)
+{
+    if(prev_block == NULL && next_block == NULL)
+    {
+        void* tmp_free_list_header = get_free_list(GET_SIZE(HDRP(current_block)));
+        PUTP(tmp_free_list_header, 0);
+        return;
+    }
+
+    if(prev_block == NULL)
+    {
+        void* tmp_free_list_header = get_free_list(GET_SIZE(HDRP(next_block)));
+        PUTP(GET_PREV_FREE_BLOCK(next_block), 0);
+        PUTP(tmp_free_list_header, (long long)next_block);
+    } 
+    else if(next_block == NULL)
+    {
+        PUTP(prev_block, 0);
+    } 
+    else 
+    {
+        PUTP(prev_block, (long long)next_block);
+        PUTP(GET_PREV_FREE_BLOCK(next_block), (long long)prev_block);
+    }
+}
+
+/*
+* init 的情况
+*   | (0 | 32] | (32 | 64] | (64 | 128] | (128 | 256 ] | (256 | 512] | (512 | 1024] | (1024 | 2048] | (2048 | 4096] | (4096 | ~] |
+*   | 0 | 8/11 | 8/11 | 0/11 |
+*/
 
 /* 合并 free block */
 static void* coalesce(void *bp) 
@@ -88,26 +141,36 @@ static void* coalesce(void *bp)
     char* next_block_header = HDRP(NEXT_BLKP(bp));
     char* prev_block_header = HDRP(PREV_BLKP(bp));
     size_t size = GET_SIZE(block_header);
-    
     size_t prev_alloc = GET_ASIDE_ALLOC(block_header);
     size_t next_alloc = GET_ALLOC(next_block_header);
+
+    void* free_list_header = get_free_list(size);
 
     if(prev_alloc && next_alloc) {                 /* Case 1 */
         PUT(block_header, PACK(size, 0x2));
         PUT(FTRP(bp), PACK(size, 0x2));
         PUT(next_block_header, PACK(GET_SIZE(next_block_header), 0x1));
     
-        PUTP(bp, GETP(heap_free_root));
-        PUTP(GET_PREV_FREE_BLOCK(bp), (long long)heap_free_root);
-        PUTP(GET_PREV_FREE_BLOCK(GETP(heap_free_root)), (long long)bp);
-        PUTP(heap_free_root, (long long)bp);
+        if(!GETP(free_list_header)) 
+        {
+            PUTP(bp, 0);
+            PUTP(GET_PREV_FREE_BLOCK(bp), 0);
+        } 
+        else 
+        {
+            PUTP(GET_PREV_FREE_BLOCK(GETP(free_list_header)), (long long)bp);
+            PUTP(bp, GETP(free_list_header));
+            PUTP(GET_PREV_FREE_BLOCK(bp), 0);
+        }
+
+        PUTP(free_list_header, (long long)bp);
         return bp;
     } else if(prev_alloc && !next_alloc) {         /* Case 2 */
         char* next_block = NEXT_BLKP(bp);
         char* next_block_prev = (char*)GETP(GET_PREV_FREE_BLOCK(next_block));
         char* next_block_next = (char*)GETP(next_block);
-        PUTP(next_block_prev, (long long)next_block_next);
-        PUTP(GET_PREV_FREE_BLOCK(next_block_next), (long long)next_block_prev);
+        connect_node(next_block_prev, next_block_next, next_block);
+
 
         size += GET_SIZE(next_block_header);
         PUT(HDRP(bp), PACK(size, 0x2));
@@ -118,8 +181,7 @@ static void* coalesce(void *bp)
         char* prev_block = PREV_BLKP(bp);
         char* prev_block_prev = (char*)GETP(GET_PREV_FREE_BLOCK(prev_block));
         char* prev_block_next = (char*)GETP(prev_block);
-        PUTP(prev_block_prev, (long long)prev_block_next);
-        PUTP(GET_PREV_FREE_BLOCK(prev_block_next), (long long)prev_block_prev);
+        connect_node(prev_block_prev, prev_block_next, prev_block);
 
         size += GET_SIZE(prev_block_header);
         PUT(prev_block_header, PACK(size, 0x2));
@@ -133,20 +195,15 @@ static void* coalesce(void *bp)
         char* next_block_prev = (char*)GETP(GET_PREV_FREE_BLOCK(next_block));
         char* prev_block_next = (char*)GETP(prev_block);
         char* prev_block_prev = (char*)GETP(GET_PREV_FREE_BLOCK(prev_block));
-        if((next_block_prev != prev_block) && (next_block_next != prev_block))
+        if(prev_block_next == next_block) 
         {
-            PUTP(next_block_prev, (long long)next_block_next);
-            PUTP(GET_PREV_FREE_BLOCK(next_block_next), (long long)next_block_prev);
-            PUTP(prev_block_prev, (long long)prev_block_next);
-            PUTP(GET_PREV_FREE_BLOCK(prev_block_next), (long long)prev_block_prev);
-        } else if(next_block_prev == prev_block){
-            PUTP(prev_block_prev, (long long)next_block_next);
-            PUTP(GET_PREV_FREE_BLOCK(next_block_next), (long long)prev_block_prev);
+            connect_node(prev_block_prev, next_block_next, prev_block);
+        } else if(prev_block == next_block_next) {
+            connect_node(next_block_prev, prev_block_next, next_block);
         } else {
-            PUTP(next_block_prev, (long long)prev_block_next);
-            PUTP(GET_PREV_FREE_BLOCK(prev_block_next), (long long)next_block_prev);
+            connect_node(prev_block_prev, prev_block_next, prev_block);
+            connect_node(next_block_prev, next_block_next, next_block);
         }
-
         size += GET_SIZE(prev_block_header) +
             GET_SIZE(next_block_header);
         PUT(prev_block_header, PACK(size, 0x2));
@@ -156,10 +213,21 @@ static void* coalesce(void *bp)
         PUT(next_block_header, PACK(GET_SIZE(next_block_header), 0x1));
     }
 
-    PUTP(bp, GETP(heap_free_root));
-    PUTP(GET_PREV_FREE_BLOCK(bp), (long long)heap_free_root);
-    PUTP(GET_PREV_FREE_BLOCK(GETP(heap_free_root)), (long long)bp);
-    PUTP(heap_free_root, (long long)bp);
+    size_t new_size = GET_SIZE(HDRP(bp));
+    free_list_header = get_free_list(new_size);
+    if(!GETP(free_list_header)) 
+    {
+        PUTP(bp, 0);
+        PUTP(GET_PREV_FREE_BLOCK(bp), 0);
+    } 
+    else 
+    {
+        PUTP(GET_PREV_FREE_BLOCK(GETP(free_list_header)), (long long)bp);
+        PUTP(bp, GETP(free_list_header));
+        PUTP(GET_PREV_FREE_BLOCK(bp), 0);
+    }
+
+    PUTP(free_list_header, (long long)bp);
     return bp;
 }
 
@@ -177,19 +245,13 @@ static void* extend_heap(size_t words)
     }    
     /*
     * init 的情况
-    *   | 0 | 24/11 | next | pointer | prev | pointer | 24/11 | 0/11 | next | pointer | prev | pointer |
+    *   | (0 | 32] | (32 | 64] | (64 | 128] | (128 | 256 ] | (256 | 512] | (512 | 1024] | (1024 | 2048] | (2048 | 4096] | (4096 | ~] |
+    *   | 0 | 8/11 | 8/11 | 0/11 |
     */
-    bp -= 4*WSIZE;
-    char* prev_block = (char*)GETP(GET_PREV_FREE_BLOCK(bp));
-
     size_t alloc = GET_ASIDE_ALLOC(HDRP(bp));
     PUT(HDRP(bp), PACK(size, alloc));
     PUT(FTRP(bp), PACK(size, alloc));
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 0x1));
-
-    PUTP(NEXT_BLKP(bp), 0);
-    PUTP(GET_PREV_FREE_BLOCK(NEXT_BLKP(bp)), (long long)prev_block);
-    PUTP(prev_block, (long long)NEXT_BLKP(bp));
     return coalesce(bp);
 }
 
@@ -199,26 +261,30 @@ static void* extend_heap(size_t words)
 int mm_init(void)
 {
     /* Create the initial empty heap */
-    /*
-    *   | WSIZE | WSIZE | WSIZE | WSIZE | WSIZE | WSIZE | WSIZE | WSIZE | WSIZE | WSIZE | WSIZE | WSIZE |
-    */
-    if((heap_listp = mem_sbrk(12 * WSIZE)) == (void*)-1)
+    if((heap_listp = mem_sbrk(22 * WSIZE)) == (void*)-1)
         return -1;
 
     /*
-    *   | 0 | 24/11 | next | pointer | prev | pointer | 24/11 | 0/11 | next | pointer | prev | pointer |
+    *   | (0 | 32] | (32 | 64] | (64 | 128] | (128 | 256 ] | (256 | 512] | (512 | 1024] | (1024 | 2048] | (2048 | 4096] | (4096 | ~] |
+    *   | 0 | 8/11 | 8/11 | 0/11 |
     */
-    PUT(heap_listp, 0);
-    PUT(heap_listp + (1*WSIZE), PACK(3*DSIZE, 0x3));
-    PUTP(heap_listp + (2*WSIZE), (long long)(heap_listp + (8*WSIZE)));
-    PUTP(heap_listp + (4*WSIZE), 0);
-    PUT(heap_listp + (6*WSIZE), PACK(3*DSIZE, 0x3));
-    PUT(heap_listp + (7*WSIZE), PACK(0, 0x3));
-    PUTP(heap_listp + (8*WSIZE), 0);
-    PUTP(heap_listp + (10*WSIZE), (long long)(heap_listp + (2*WSIZE)));
+    PUTP(heap_listp, 0);
+    PUTP(heap_listp + DSIZE, 0);
+    PUTP(heap_listp + (2*DSIZE), 0);
+    PUTP(heap_listp + (3*DSIZE), 0);
+    PUTP(heap_listp + (4*DSIZE), 0);
+    PUTP(heap_listp + (5*DSIZE), 0);
+    PUTP(heap_listp + (6*DSIZE), 0);
+    PUTP(heap_listp + (7*DSIZE), 0);
+    PUTP(heap_listp + (8*DSIZE), 0);
 
-    heap_listp += (2*WSIZE);
-    heap_free_root = heap_listp;
+    PUT(heap_listp + (9*DSIZE), 0);
+    PUT(heap_listp + ((9*DSIZE)+WSIZE), PACK(DSIZE, 0x3));
+    PUT(heap_listp + (10*DSIZE), PACK(DSIZE, 0x3));
+    PUT(heap_listp + ((10*DSIZE)+WSIZE), PACK(0, 0x3));
+
+    heap_start = heap_listp;
+    heap_listp += (10*DSIZE);
 
     /* Extend the empty heap with a free block of CHUNKSIZE bytes */
     if(extend_heap(CHUNKSIZE/WSIZE) == NULL)
@@ -230,9 +296,11 @@ static void place(void *bp, size_t asize)
 {
     size_t size = GET_SIZE(HDRP(bp));
     size_t spare_block_size = size - asize;
-    
+
     char* next_block = (char*)GETP(bp);
     char* prev_block = (char*)GETP(GET_PREV_FREE_BLOCK(bp));
+
+    connect_node(prev_block, next_block, bp);
 
     if(spare_block_size >= 3*DSIZE) 
     {
@@ -241,45 +309,65 @@ static void place(void *bp, size_t asize)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(spare_block_size, 0x2));
 
         char* free_block = NEXT_BLKP(bp);
-        PUTP(free_block, (long long)next_block);
-        PUTP(GET_PREV_FREE_BLOCK(free_block), (long long)prev_block);
-        PUTP(prev_block, (long long)free_block);
-        PUTP(GET_PREV_FREE_BLOCK(next_block), (long long)free_block);
-    } else {
+        void* free_list_header = get_free_list(spare_block_size);
+        if(!GETP(free_list_header)) 
+        {
+            PUTP(free_block, 0);
+            PUTP(GET_PREV_FREE_BLOCK(free_block), 0);
+        } 
+        else 
+        {
+            PUTP(GET_PREV_FREE_BLOCK(GETP(free_list_header)), (long long)free_block);
+            PUTP(free_block, GETP(free_list_header));
+            PUTP(GET_PREV_FREE_BLOCK(free_block), 0);
+        }
+
+        PUTP(free_list_header, (long long)free_block);
+    } else 
+    {
         PUT(HDRP(bp), PACK(size, 0x3)); 
         size_t next_size = GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(NEXT_BLKP(bp)), PACK(next_size, 0x3));
-
-        PUTP(prev_block, (long long)next_block);
-        PUTP(GET_PREV_FREE_BLOCK(next_block), (long long)prev_block);
     }
 }
 
 static void* find_fit(size_t asize) 
 {
-    char* tmp_heap_listp = (char*)GETP(heap_free_root);
-    size_t min_size = (size_t)-1;
-    char* min_heap_listp = NULL;
+    char* free_list_header = (char*)get_free_list(asize);
 
-    while(1) 
+    // if(GETP(free_list_header) && (GET_SIZE(HDRP(GETP(free_list_header))) >= asize))
+    // {
+    //     void* return_value = (void*)GETP(free_list_header);
+    //     return return_value;
+    // }
+
+    char* free_list = (char*)GETP(free_list_header);
+    while(free_list) 
     {
-        size_t size = GET_SIZE(HDRP(tmp_heap_listp));
-        if(size == 0)
-            break;
-        
-        if(size >= asize) 
+        if(GET_SIZE(HDRP(free_list)) >= asize)
         {
-            if(size < min_size) {
-                min_size = size;
-                min_heap_listp = tmp_heap_listp;
-            }
+            return free_list;
         }
 
-        tmp_heap_listp = (char*)GETP(tmp_heap_listp);
+        free_list = (char*)GETP(free_list); 
     }
 
-    if(min_size < (size_t)-1) {
-        return min_heap_listp;
+    char* free_list_end = heap_listp - (2*DSIZE);
+    free_list_header += DSIZE;
+    while(free_list_header <= free_list_end)
+    {
+        free_list = (char*)GETP(free_list_header);
+        while(free_list) 
+        {
+            if(GET_SIZE(HDRP(free_list)) >= asize)
+            {
+                return free_list;
+            }
+
+            free_list = (char*)GETP(free_list);
+        }
+
+        free_list_header += DSIZE;
     }
 
     return NULL;
@@ -291,6 +379,8 @@ static void* find_fit(size_t asize)
  */
 void *mm_malloc(size_t size)
 {
+    //++g_test_count;
+
     size_t asize;
     size_t extendsize; 
     char* bp;
@@ -302,8 +392,10 @@ void *mm_malloc(size_t size)
         asize = 3 * DSIZE;
     else 
         asize = ALIGN(size + WSIZE);
+    
 
-    if((bp = find_fit(asize)) != NULL) {
+    if((bp = find_fit(asize)) != NULL) 
+    {
         place(bp, asize);
         return bp;
     }
@@ -311,6 +403,7 @@ void *mm_malloc(size_t size)
     extendsize = MAX(asize, CHUNKSIZE);
     if((bp = extend_heap(extendsize/WSIZE)) == NULL)
         return NULL;
+
     place(bp, asize);
     return bp;
 }
@@ -362,3 +455,40 @@ void *mm_realloc(void *ptr, size_t size)
     mm_free(ptr);
     return newptr;
 }
+
+// void mm_check()
+// {
+//     fprintf(stderr, "header list:\n");
+
+//     char* tmp_list_header = heap_start, *tmp_list_end = heap_start + (9*DSIZE);
+//     while(tmp_list_header < tmp_list_end)
+//     {
+//         fprintf(stderr, "%p ", (void*)GETP(tmp_list_header));
+//         tmp_list_header += DSIZE;
+//     }
+
+//     fprintf(stderr, "\n");
+
+//     tmp_list_header = heap_listp;
+
+//     while(1)
+//     {
+//         size_t alloc = GET_ALLOC(HDRP(tmp_list_header));
+//         size_t size = GET_SIZE(HDRP(tmp_list_header));
+        
+//         if(!alloc)
+//             fprintf(stderr, "alloc: %lu, aside alloc: %u, size: %lu, pointer: %p, next: %p, prev: %p\t", alloc, GET_ASIDE_ALLOC(HDRP(tmp_list_header)), size, tmp_list_header, (void*)GETP(tmp_list_header),
+//                 (void*)GETP(GET_PREV_FREE_BLOCK(tmp_list_header)));
+//         else 
+//             fprintf(stderr, "alloc: %lu, aside alloc: %u, size: %lu, pointer: %p\t", alloc, GET_ASIDE_ALLOC(HDRP(tmp_list_header)), size, tmp_list_header);
+//         if(size == 0)
+//         {
+//             fprintf(stderr, "\n");
+//             return;
+//         }
+
+//         tmp_list_header = NEXT_BLKP(tmp_list_header);
+//     }
+    
+//     fprintf(stderr, "\n");
+// }
