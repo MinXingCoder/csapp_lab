@@ -82,9 +82,9 @@ static char* heap_listp;
 /* Pointer to heap start */
 static char* heap_start;
 
-// int g_test_count = 0;
-
-// static void mm_check();
+#ifdef DEBUG_MALLOC
+static void mm_check();
+#endif
 
 static void* get_free_list(size_t size)
 {
@@ -335,12 +335,6 @@ static void* find_fit(size_t asize)
 {
     char* free_list_header = (char*)get_free_list(asize);
 
-    // if(GETP(free_list_header) && (GET_SIZE(HDRP(GETP(free_list_header))) >= asize))
-    // {
-    //     void* return_value = (void*)GETP(free_list_header);
-    //     return return_value;
-    // }
-
     char* free_list = (char*)GETP(free_list_header);
     while(free_list) 
     {
@@ -456,39 +450,41 @@ void *mm_realloc(void *ptr, size_t size)
     return newptr;
 }
 
-// void mm_check()
-// {
-//     fprintf(stderr, "header list:\n");
+#ifdef DEBUG_MALLOC
+void mm_check()
+{
+    fprintf(stderr, "header list:\n");
 
-//     char* tmp_list_header = heap_start, *tmp_list_end = heap_start + (9*DSIZE);
-//     while(tmp_list_header < tmp_list_end)
-//     {
-//         fprintf(stderr, "%p ", (void*)GETP(tmp_list_header));
-//         tmp_list_header += DSIZE;
-//     }
+    char* tmp_list_header = heap_start, *tmp_list_end = heap_start + (9*DSIZE);
+    while(tmp_list_header < tmp_list_end)
+    {
+        fprintf(stderr, "%p ", (void*)GETP(tmp_list_header));
+        tmp_list_header += DSIZE;
+    }
 
-//     fprintf(stderr, "\n");
+    fprintf(stderr, "\n");
 
-//     tmp_list_header = heap_listp;
+    tmp_list_header = heap_listp;
 
-//     while(1)
-//     {
-//         size_t alloc = GET_ALLOC(HDRP(tmp_list_header));
-//         size_t size = GET_SIZE(HDRP(tmp_list_header));
+    while(1)
+    {
+        size_t alloc = GET_ALLOC(HDRP(tmp_list_header));
+        size_t size = GET_SIZE(HDRP(tmp_list_header));
         
-//         if(!alloc)
-//             fprintf(stderr, "alloc: %lu, aside alloc: %u, size: %lu, pointer: %p, next: %p, prev: %p\t", alloc, GET_ASIDE_ALLOC(HDRP(tmp_list_header)), size, tmp_list_header, (void*)GETP(tmp_list_header),
-//                 (void*)GETP(GET_PREV_FREE_BLOCK(tmp_list_header)));
-//         else 
-//             fprintf(stderr, "alloc: %lu, aside alloc: %u, size: %lu, pointer: %p\t", alloc, GET_ASIDE_ALLOC(HDRP(tmp_list_header)), size, tmp_list_header);
-//         if(size == 0)
-//         {
-//             fprintf(stderr, "\n");
-//             return;
-//         }
+        if(!alloc)
+            fprintf(stderr, "alloc: %lu, aside alloc: %u, size: %lu, pointer: %p, next: %p, prev: %p\t", alloc, GET_ASIDE_ALLOC(HDRP(tmp_list_header)), size, tmp_list_header, (void*)GETP(tmp_list_header),
+                (void*)GETP(GET_PREV_FREE_BLOCK(tmp_list_header)));
+        else 
+            fprintf(stderr, "alloc: %lu, aside alloc: %u, size: %lu, pointer: %p\t", alloc, GET_ASIDE_ALLOC(HDRP(tmp_list_header)), size, tmp_list_header);
+        if(size == 0)
+        {
+            fprintf(stderr, "\n");
+            return;
+        }
 
-//         tmp_list_header = NEXT_BLKP(tmp_list_header);
-//     }
+        tmp_list_header = NEXT_BLKP(tmp_list_header);
+    }
     
-//     fprintf(stderr, "\n");
-// }
+    fprintf(stderr, "\n");
+}
+#endif
